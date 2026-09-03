@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>AudioTwin</AssemblyName>
+    <RootNamespace>AudioTwin</RootNamespace>
+    <Product>AudioTwin</Product>
+    <AssemblyTitle>AudioTwin</AssemblyTitle>
+    <Version>1.1.0</Version>
+    <!-- No designer files are used; the UI is built in code. -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- The icon Explorer, the taskbar and Alt+Tab show for the .exe. -->
+    <ApplicationIcon>AudioTwin.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="NAudio" Version="2.2.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Also embedded so the window icon can be loaded at run time. Single-file
+         publish leaves no .ico next to the .exe to read from. -->
+    <EmbeddedResource Include="AudioTwin.ico" LogicalName="AudioTwin.ico" />
+  </ItemGroup>
+
+</Project>
