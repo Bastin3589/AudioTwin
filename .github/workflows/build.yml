@@ -9,7 +9,8 @@ on:
 jobs:
   build:
     runs-on: windows-latest
-     permissions:
+
+    permissions:
       contents: write
 
     strategy:
