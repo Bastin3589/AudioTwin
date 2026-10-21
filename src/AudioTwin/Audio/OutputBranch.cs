@@ -202,7 +202,10 @@ public sealed class OutputBranch : IDisposable
         try
         {
             if (device.State != DeviceState.Active)
+            {
+                device.Dispose();
                 throw new InvalidOperationException($"\"{DeviceName}\" is not active (unplugged or disabled).");
+            }
             DeviceName = device.FriendlyName;
         }
         catch (InvalidOperationException)
@@ -246,9 +249,9 @@ public sealed class OutputBranch : IDisposable
 
         var output = new WasapiOut(_device!, AudioClientShareMode.Shared, true, OutputLatencyMilliseconds);
         output.PlaybackStopped += OnPlaybackStopped;
+        _output = output; // Cleanup also owns partially initialized outputs.
         output.Init(tail);
         output.Play();
-        _output = output;
     }
 
     private void OnPlaybackStopped(object? sender, StoppedEventArgs e)
@@ -282,7 +285,8 @@ public sealed class OutputBranch : IDisposable
         _volume = null;
         _delay = null;
         _queue = null;
-        _device = null; // a fresh MMDevice is resolved on the next Start()
+        try { _device?.Dispose(); } catch { }
+        _device = null;
     }
 
     private static string Describe(Exception ex) =>
