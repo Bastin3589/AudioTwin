@@ -56,6 +56,7 @@ public sealed class DeviceWatcher : IMMNotificationClient, IDisposable
                 {
                     // A device can vanish between enumeration and property read.
                 }
+                finally { device.Dispose(); }
             }
         }
         catch
@@ -78,7 +79,8 @@ public sealed class DeviceWatcher : IMMNotificationClient, IDisposable
         {
             if (!_enumerator.HasDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia))
                 return null;
-            return _enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia).ID;
+            using var device = _enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+            return device.ID;
         }
         catch
         {
@@ -92,7 +94,8 @@ public sealed class DeviceWatcher : IMMNotificationClient, IDisposable
         {
             if (!_enumerator.HasDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia))
                 return null;
-            return _enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia).FriendlyName;
+            using var device = _enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+            return device.FriendlyName;
         }
         catch
         {

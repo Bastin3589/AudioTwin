@@ -21,6 +21,7 @@ public sealed class MainForm : Form
     private readonly AudioRouter _router = new();
     private readonly AppSettings _settings = AppSettings.Load();
     private readonly System.Windows.Forms.Timer _deviceRefreshTimer = new() { Interval = 750 };
+    private readonly System.Windows.Forms.Timer _recoveryTimer = new() { Interval = 5000 };
 
     private readonly Label _titleLabel = new();
     private readonly Label _inputLabel = new();
@@ -50,6 +51,7 @@ public sealed class MainForm : Form
     private bool _allowVisible;
     private bool _exiting;
     private bool _launchHandled;
+    private bool _routingRequested;
 
     public MainForm(bool startHidden = false)
     {
@@ -74,81 +76,75 @@ public sealed class MainForm : Form
         UpdateSliderLabels();
         RefreshDevices(applySavedSelection: true);
         UpdateStatus();
+        _recoveryTimer.Tick += (_, _) =>
+        {
+            if (_router.IsRunning) _router.RetryFailedOutputs();
+            else if (_routingRequested) StartRouting(recovery: true);
+        };
+        _recoveryTimer.Start();
     }
 
     // ---------------------------------------------------------------- layout
 
     private void BuildUi()
     {
+        SuspendLayout();
+        AutoScaleDimensions = new SizeF(96F, 96F);
+        AutoScaleMode = AutoScaleMode.Dpi;
         Text = "AudioTwin";
-        Font = new Font("Segoe UI", 9F, FontStyle.Regular, GraphicsUnit.Point);
-        FormBorderStyle = FormBorderStyle.FixedSingle;
-        MaximizeBox = false;
+        Font = new Font("Segoe UI", 9F);
+        ClientSize = new Size(620, 740);
+        MinimumSize = new Size(480, 500);
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(480, 664);
         BackColor = SystemColors.Window;
-
-        // The tray icon is the application's presence; the window is not.
-        // Set before the handle exists so it never has to be recreated.
         ShowInTaskbar = false;
-
+        var scroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
+        var layout = new TableLayoutPanel {
+            Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1,
+            Padding = new Padding(16), GrowStyle = TableLayoutPanelGrowStyle.AddRows
+        };
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        void Add(Control control) {
+            control.Dock = DockStyle.Top;
+            control.Margin = new Padding(0, 0, 0, 10);
+            layout.Controls.Add(control, 0, layout.RowCount++);
+        }
+        void LabelStyle(Label label) {
+            label.AutoSize = true;
+            label.MaximumSize = new Size(560, 0);
+        }
         _titleLabel.Text = "AudioTwin";
-        _titleLabel.Font = new Font("Segoe UI", 13F, FontStyle.Bold);
-        _titleLabel.Location = new Point(15, 12);
-        _titleLabel.AutoSize = true;
-
-        _inputLabel.Location = new Point(18, 46);
-        _inputLabel.Size = new Size(340, 20);
-        _inputLabel.Text = "Input:  Windows Default Audio";
-
+        _titleLabel.Font = new Font(Font.FontFamily, 16F, FontStyle.Bold);
+        LabelStyle(_titleLabel); Add(_titleLabel);
+        LabelStyle(_inputLabel); Add(_inputLabel);
         _refreshButton.Text = "Refresh devices";
-        _refreshButton.Location = new Point(355, 42);
-        _refreshButton.Size = new Size(110, 26);
-
-        _output1.Build("Output 1", new Point(15, 76), new Size(450, 152));
-        _output2.Build("Output 2", new Point(15, 236), new Size(450, 152));
-
+        _refreshButton.AutoSize = true; Add(_refreshButton);
+        _output1.Build("Output 1");
+        _output2.Build("Output 2");
+        Add(_output1.Group); Add(_output2.Group);
         _startButton.Text = "START ROUTING";
-        _startButton.Font = new Font("Segoe UI", 11F, FontStyle.Bold);
-        _startButton.Location = new Point(15, 400);
-        _startButton.Size = new Size(450, 44);
-
-        _statusLabel.Location = new Point(18, 454);
-        _statusLabel.Size = new Size(447, 20);
-        _statusLabel.Font = new Font("Segoe UI", 9.75F, FontStyle.Bold);
-
+        _startButton.Font = new Font(Font, FontStyle.Bold);
+        _startButton.AutoSize = true;
+        _startButton.Padding = new Padding(8); Add(_startButton);
+        LabelStyle(_statusLabel); Add(_statusLabel);
         _autoStartCheck.Text = "Start routing when application launches";
-        _autoStartCheck.Location = new Point(16, 482);
-        _autoStartCheck.Size = new Size(440, 22);
-
-        _startWithWindowsCheck.Text = "Start with Windows (starts hidden in the notification area)";
-        _startWithWindowsCheck.Location = new Point(16, 506);
-        _startWithWindowsCheck.Size = new Size(440, 22);
-
+        _startWithWindowsCheck.Text = "Start with Windows (hidden in tray)";
         _startMinimizedCheck.Text = "Start hidden in the notification area";
-        _startMinimizedCheck.Location = new Point(16, 530);
-        _startMinimizedCheck.Size = new Size(440, 22);
-
         _closeToTrayCheck.Text = "Closing this window hides it instead of quitting";
-        _closeToTrayCheck.Location = new Point(16, 554);
-        _closeToTrayCheck.Size = new Size(440, 22);
-
+        foreach (var check in new[] { _autoStartCheck, _startWithWindowsCheck,
+                     _startMinimizedCheck, _closeToTrayCheck }) {
+            check.AutoSize = true; Add(check);
+        }
         _hideButton.Text = "Hide to notification area";
-        _hideButton.Location = new Point(295, 582);
-        _hideButton.Size = new Size(170, 28);
-
-        _messageLabel.Location = new Point(18, 616);
-        _messageLabel.Size = new Size(447, 40);
-        _messageLabel.ForeColor = Color.FromArgb(90, 90, 90);
-
-        Controls.AddRange(new Control[]
-        {
-            _titleLabel, _inputLabel, _refreshButton,
-            _output1.Group, _output2.Group,
-            _startButton, _statusLabel,
-            _autoStartCheck, _startWithWindowsCheck, _startMinimizedCheck, _closeToTrayCheck,
-            _hideButton, _messageLabel
-        });
+        _hideButton.AutoSize = true; Add(_hideButton);
+        LabelStyle(_messageLabel); Add(_messageLabel);
+        scroll.Controls.Add(layout); Controls.Add(scroll);
+        scroll.ClientSizeChanged += (_, _) => {
+            int width = Math.Max(180, scroll.ClientSize.Width - layout.Padding.Horizontal - 24);
+            foreach (var label in new[] { _inputLabel, _statusLabel, _messageLabel })
+                label.MaximumSize = new Size(width, 0);
+        };
+        ResumeLayout(true);
     }
 
     private void BuildTray()
@@ -354,6 +350,7 @@ public sealed class MainForm : Form
         try { _router.Dispose(); } catch { }
         try { _watcher.Dispose(); } catch { }
         _deviceRefreshTimer.Stop();
+        _recoveryTimer.Stop();
     }
 
     private void Balloon(string title, string text, ToolTipIcon icon)
@@ -364,7 +361,7 @@ public sealed class MainForm : Form
 
     private void SyncTrayMenu()
     {
-        _menuRouting.Text = _router.IsRunning ? "Stop routing" : "Start routing";
+        _menuRouting.Text = _routingRequested ? "Stop routing" : "Start routing";
         _menuStartWithWindows.Checked = _startWithWindowsCheck.Checked;
     }
 
@@ -378,6 +375,7 @@ public sealed class MainForm : Form
             try { _tray.Dispose(); } catch { }
             try { _trayMenu.Dispose(); } catch { }
             try { _deviceRefreshTimer.Dispose(); } catch { }
+            try { _recoveryTimer.Dispose(); } catch { }
         }
 
         base.Dispose(disposing);
@@ -393,8 +391,9 @@ public sealed class MainForm : Form
 
     private void ToggleRouting()
     {
-        if (_router.IsRunning)
+        if (_router.IsRunning || _routingRequested)
         {
+            _routingRequested = false;
             _router.Stop();
             ShowMessage("Routing stopped.");
         }
@@ -406,7 +405,7 @@ public sealed class MainForm : Form
         UpdateStatus();
     }
 
-    private void StartRouting()
+    private void StartRouting(bool recovery = false)
     {
         var device1 = _output1.SelectedDevice;
         var device2 = _output2.SelectedDevice;
@@ -416,6 +415,8 @@ public sealed class MainForm : Form
             ShowMessage("Choose a playback device for both outputs.", isError: true);
             return;
         }
+
+        _routingRequested = true;
 
         try
         {
@@ -432,10 +433,10 @@ public sealed class MainForm : Form
         catch (Exception ex)
         {
             ShowMessage(ex.Message, isError: true);
-            if (!Visible) Balloon("Could not start routing", ex.Message, ToolTipIcon.Error);
+            if (!Visible && !recovery) Balloon("Could not start routing", ex.Message, ToolTipIcon.Error);
         }
 
-        SaveSettings();
+        if (!recovery) SaveSettings();
         UpdateStatus();
     }
 
@@ -533,7 +534,7 @@ public sealed class MainForm : Form
     private void UpdateStatus()
     {
         bool running = _router.IsRunning;
-        _startButton.Text = running ? "STOP ROUTING" : "START ROUTING";
+        _startButton.Text = _routingRequested ? "STOP ROUTING" : "START ROUTING";
 
         var branch1 = _router.Branch1;
         var branch2 = _router.Branch2;
@@ -663,61 +664,47 @@ public sealed class MainForm : Form
 
         public AudioDeviceInfo? SelectedDevice => Devices.SelectedItem as AudioDeviceInfo;
 
-        public void Build(string title, Point location, Size size)
+        public void Build(string title)
         {
             Group.Text = title;
-            Group.Location = location;
-            Group.Size = size;
-
+            Group.AutoSize = true;
+            Group.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            Group.Padding = new Padding(12, 20, 12, 12);
+            var grid = new TableLayoutPanel {
+                Dock = DockStyle.Top, AutoSize = true, ColumnCount = 3, RowCount = 4
+            };
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             Devices.DropDownStyle = ComboBoxStyle.DropDownList;
-            Devices.Location = new Point(12, 26);
-            Devices.Size = new Size(422, 24);
-
+            Devices.Dock = DockStyle.Fill;
+            Devices.DropDownWidth = 760;
+            grid.Controls.Add(Devices, 0, 0); grid.SetColumnSpan(Devices, 3);
             _volumeCaption.Text = "Volume";
-            _volumeCaption.Location = new Point(12, 62);
-            _volumeCaption.Size = new Size(55, 20);
-
-            Volume.AutoSize = false;
-            Volume.Location = new Point(68, 56);
-            Volume.Size = new Size(300, 32);
-            Volume.Minimum = 0;
-            Volume.Maximum = 100;
-            Volume.TickFrequency = 10;
-            Volume.SmallChange = 1;
-            Volume.LargeChange = 10;
-            Volume.Value = 100;
-
-            VolumeValue.Location = new Point(378, 62);
-            VolumeValue.Size = new Size(56, 20);
-            VolumeValue.TextAlign = ContentAlignment.MiddleRight;
-
             _delayCaption.Text = "Delay";
-            _delayCaption.Location = new Point(12, 98);
-            _delayCaption.Size = new Size(55, 20);
-
-            Delay.AutoSize = false;
-            Delay.Location = new Point(68, 92);
-            Delay.Size = new Size(300, 32);
-            Delay.Minimum = 0;
-            Delay.Maximum = OutputBranch.MaxDelayMilliseconds;
-            Delay.TickFrequency = 50;
-            Delay.SmallChange = 5;
-            Delay.LargeChange = 25;
-            Delay.Value = 0;
-
-            DelayValue.Location = new Point(378, 98);
-            DelayValue.Size = new Size(56, 20);
-            DelayValue.TextAlign = ContentAlignment.MiddleRight;
-
-            Note.Location = new Point(12, 126);
-            Note.Size = new Size(422, 18);
-            Note.Font = new Font("Segoe UI", 8F);
-            Note.ForeColor = Color.FromArgb(110, 110, 110);
-
-            Group.Controls.AddRange(new Control[]
-            {
-                Devices, _volumeCaption, Volume, VolumeValue, _delayCaption, Delay, DelayValue, Note
-            });
+            Volume.Minimum = 0; Volume.Maximum = 100; Volume.Value = 100;
+            Volume.SmallChange = 1; Volume.LargeChange = 10;
+            Delay.Minimum = 0; Delay.Maximum = OutputBranch.MaxDelayMilliseconds;
+            Delay.SmallChange = 5; Delay.LargeChange = 25;
+            int row = 1;
+            foreach (var controls in new[] {
+                new Control[] { _volumeCaption, Volume, VolumeValue },
+                new Control[] { _delayCaption, Delay, DelayValue } }) {
+                for (int col = 0; col < 3; col++) {
+                    var c = controls[col]; c.Dock = DockStyle.Fill;
+                    if (c is Label l) { l.AutoSize = true; l.TextAlign = ContentAlignment.MiddleLeft; }
+                    if (c is TrackBar t) { t.TickStyle = TickStyle.None; t.AutoSize = true; }
+                    grid.Controls.Add(c, col, row);
+                }
+                row++;
+            }
+            VolumeValue.MinimumSize = DelayValue.MinimumSize = new Size(60, 0);
+            Note.AutoSize = true;
+            Note.MaximumSize = new Size(520, 0);
+            Note.ForeColor = SystemColors.GrayText;
+            grid.Controls.Add(Note, 0, 3); grid.SetColumnSpan(Note, 3);
+            grid.SizeChanged += (_, _) => Note.MaximumSize = new Size(Math.Max(100, grid.Width - 12), 0);
+            Group.Controls.Add(grid);
         }
 
         public void SetNote(string text, Color color)
@@ -738,6 +725,7 @@ public sealed class MainForm : Form
         /// </summary>
         public void Fill(IReadOnlyList<AudioDeviceInfo> devices, string? wantedId, bool preferDefault, string? avoidId)
         {
+            var previous = SelectedDevice;
             Devices.BeginUpdate();
             try
             {
@@ -748,6 +736,15 @@ public sealed class MainForm : Form
 
                 if (!string.IsNullOrEmpty(wantedId))
                     index = IndexOf(devices, d => string.Equals(d.Id, wantedId, StringComparison.OrdinalIgnoreCase));
+
+                // Retain the chosen endpoint across disconnects instead of silently
+                // replacing it with an unrelated active output.
+                if (index < 0 && !string.IsNullOrEmpty(wantedId))
+                {
+                    Devices.Items.Add(new AudioDeviceInfo(wantedId,
+                        previous?.Name ?? "Saved device (disconnected)", false));
+                    index = Devices.Items.Count - 1;
+                }
 
                 if (index < 0 && preferDefault)
                     index = IndexOf(devices, d => d.IsDefault);

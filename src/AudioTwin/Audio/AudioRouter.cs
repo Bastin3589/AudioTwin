@@ -23,6 +23,7 @@ public sealed class AudioRouter : IDisposable
     private readonly object _sync = new();
 
     private WasapiLoopbackCapture? _capture;
+    private MMDevice? _sourceDevice;
     private bool _stoppingCapture;
     private bool _disposed;
 
@@ -86,6 +87,7 @@ public sealed class AudioRouter : IDisposable
             }
             catch (Exception ex)
             {
+                defaultDevice.Dispose();
                 throw new InvalidOperationException(
                     $"Could not capture from \"{SourceDeviceName}\": {ex.Message}", ex);
             }
@@ -115,6 +117,7 @@ public sealed class AudioRouter : IDisposable
                 branch1.Dispose();
                 branch2.Dispose();
                 try { capture.Dispose(); } catch { }
+                defaultDevice.Dispose();
                 CaptureFormat = null;
                 throw new InvalidOperationException(
                     problems.Count > 0
@@ -123,6 +126,7 @@ public sealed class AudioRouter : IDisposable
             }
 
             _capture = capture;
+            _sourceDevice = defaultDevice;
             Branch1 = branch1;
             Branch2 = branch2;
             _stoppingCapture = false;
@@ -199,7 +203,8 @@ public sealed class AudioRouter : IDisposable
         try
         {
             if (!_enumerator.HasDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia)) return true;
-            var id = _enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia).ID;
+            using var device = _enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+            var id = device.ID;
             return !string.Equals(id, SourceDeviceId, StringComparison.OrdinalIgnoreCase);
         }
         catch
@@ -247,14 +252,18 @@ public sealed class AudioRouter : IDisposable
             ? $"Capture from \"{SourceDeviceName}\" stopped: {e.Exception.Message}"
             : $"Capture from \"{SourceDeviceName}\" stopped unexpectedly.";
 
-        try
+        // Never wait for the UI's lock on the recording thread: StopRecording
+        // may be joining this very thread while holding that lock.
+        ThreadPool.QueueUserWorkItem(_ =>
         {
-            lock (_sync) { StopInternal(); }
-        }
-        catch { }
-
-        StoppedUnexpectedly?.Invoke(this, reason);
-        StateChanged?.Invoke(this, EventArgs.Empty);
+            lock (_sync)
+            {
+                if (!ReferenceEquals(sender, _capture)) return;
+                StopInternal();
+            }
+            StoppedUnexpectedly?.Invoke(this, reason);
+            StateChanged?.Invoke(this, EventArgs.Empty);
+        });
     }
 
     private void OnBranchFailed(object? sender, string message)
@@ -276,6 +285,8 @@ public sealed class AudioRouter : IDisposable
             try { capture.StopRecording(); } catch { }
             try { capture.Dispose(); } catch { }
         }
+        try { _sourceDevice?.Dispose(); } catch { }
+        _sourceDevice = null;
 
         var b1 = Branch1;
         var b2 = Branch2;
