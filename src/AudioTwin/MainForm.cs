@@ -712,6 +712,7 @@ public sealed class MainForm : Form
         /// </summary>
         public void Fill(IReadOnlyList<AudioDeviceInfo> devices, string? wantedId, bool preferDefault, string? avoidId)
         {
+            var previous = SelectedDevice;
             Devices.BeginUpdate();
             try
             {
@@ -722,6 +723,15 @@ public sealed class MainForm : Form
 
                 if (!string.IsNullOrEmpty(wantedId))
                     index = IndexOf(devices, d => string.Equals(d.Id, wantedId, StringComparison.OrdinalIgnoreCase));
+
+                // Retain the chosen endpoint across disconnects instead of silently
+                // replacing it with an unrelated active output.
+                if (index < 0 && !string.IsNullOrEmpty(wantedId))
+                {
+                    Devices.Items.Add(new AudioDeviceInfo(wantedId,
+                        previous?.Name ?? "Saved device (disconnected)", false));
+                    index = Devices.Items.Count - 1;
+                }
 
                 if (index < 0 && preferDefault)
                     index = IndexOf(devices, d => d.IsDefault);
