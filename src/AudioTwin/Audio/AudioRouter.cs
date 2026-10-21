@@ -252,14 +252,18 @@ public sealed class AudioRouter : IDisposable
             ? $"Capture from \"{SourceDeviceName}\" stopped: {e.Exception.Message}"
             : $"Capture from \"{SourceDeviceName}\" stopped unexpectedly.";
 
-        try
+        // Never wait for the UI's lock on the recording thread: StopRecording
+        // may be joining this very thread while holding that lock.
+        ThreadPool.QueueUserWorkItem(_ =>
         {
-            lock (_sync) { StopInternal(); }
-        }
-        catch { }
-
-        StoppedUnexpectedly?.Invoke(this, reason);
-        StateChanged?.Invoke(this, EventArgs.Empty);
+            lock (_sync)
+            {
+                if (!ReferenceEquals(sender, _capture)) return;
+                StopInternal();
+            }
+            StoppedUnexpectedly?.Invoke(this, reason);
+            StateChanged?.Invoke(this, EventArgs.Empty);
+        });
     }
 
     private void OnBranchFailed(object? sender, string message)
