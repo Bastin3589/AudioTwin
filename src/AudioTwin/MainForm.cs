@@ -21,6 +21,7 @@ public sealed class MainForm : Form
     private readonly AudioRouter _router = new();
     private readonly AppSettings _settings = AppSettings.Load();
     private readonly System.Windows.Forms.Timer _deviceRefreshTimer = new() { Interval = 750 };
+    private readonly System.Windows.Forms.Timer _recoveryTimer = new() { Interval = 5000 };
 
     private readonly Label _titleLabel = new();
     private readonly Label _inputLabel = new();
@@ -50,6 +51,7 @@ public sealed class MainForm : Form
     private bool _allowVisible;
     private bool _exiting;
     private bool _launchHandled;
+    private bool _routingRequested;
 
     public MainForm(bool startHidden = false)
     {
@@ -74,6 +76,12 @@ public sealed class MainForm : Form
         UpdateSliderLabels();
         RefreshDevices(applySavedSelection: true);
         UpdateStatus();
+        _recoveryTimer.Tick += (_, _) =>
+        {
+            if (_router.IsRunning) _router.RetryFailedOutputs();
+            else if (_routingRequested) StartRouting(recovery: true);
+        };
+        _recoveryTimer.Start();
     }
 
     // ---------------------------------------------------------------- layout
@@ -342,6 +350,7 @@ public sealed class MainForm : Form
         try { _router.Dispose(); } catch { }
         try { _watcher.Dispose(); } catch { }
         _deviceRefreshTimer.Stop();
+        _recoveryTimer.Stop();
     }
 
     private void Balloon(string title, string text, ToolTipIcon icon)
@@ -352,7 +361,7 @@ public sealed class MainForm : Form
 
     private void SyncTrayMenu()
     {
-        _menuRouting.Text = _router.IsRunning ? "Stop routing" : "Start routing";
+        _menuRouting.Text = _routingRequested ? "Stop routing" : "Start routing";
         _menuStartWithWindows.Checked = _startWithWindowsCheck.Checked;
     }
 
@@ -366,6 +375,7 @@ public sealed class MainForm : Form
             try { _tray.Dispose(); } catch { }
             try { _trayMenu.Dispose(); } catch { }
             try { _deviceRefreshTimer.Dispose(); } catch { }
+            try { _recoveryTimer.Dispose(); } catch { }
         }
 
         base.Dispose(disposing);
@@ -381,8 +391,9 @@ public sealed class MainForm : Form
 
     private void ToggleRouting()
     {
-        if (_router.IsRunning)
+        if (_router.IsRunning || _routingRequested)
         {
+            _routingRequested = false;
             _router.Stop();
             ShowMessage("Routing stopped.");
         }
@@ -394,7 +405,7 @@ public sealed class MainForm : Form
         UpdateStatus();
     }
 
-    private void StartRouting()
+    private void StartRouting(bool recovery = false)
     {
         var device1 = _output1.SelectedDevice;
         var device2 = _output2.SelectedDevice;
@@ -404,6 +415,8 @@ public sealed class MainForm : Form
             ShowMessage("Choose a playback device for both outputs.", isError: true);
             return;
         }
+
+        _routingRequested = true;
 
         try
         {
@@ -420,10 +433,10 @@ public sealed class MainForm : Form
         catch (Exception ex)
         {
             ShowMessage(ex.Message, isError: true);
-            if (!Visible) Balloon("Could not start routing", ex.Message, ToolTipIcon.Error);
+            if (!Visible && !recovery) Balloon("Could not start routing", ex.Message, ToolTipIcon.Error);
         }
 
-        SaveSettings();
+        if (!recovery) SaveSettings();
         UpdateStatus();
     }
 
@@ -521,7 +534,7 @@ public sealed class MainForm : Form
     private void UpdateStatus()
     {
         bool running = _router.IsRunning;
-        _startButton.Text = running ? "STOP ROUTING" : "START ROUTING";
+        _startButton.Text = _routingRequested ? "STOP ROUTING" : "START ROUTING";
 
         var branch1 = _router.Branch1;
         var branch2 = _router.Branch2;
